@@ -9,11 +9,12 @@ This Repository contains all the resources related to the data science specializ
 The folder structur adopted for the data preparation and Analysis document generation is as follows :
 
  - data
-     - dictionaries (contains the generated vocabularies)
-     - resources (additional resources e.g profanity file )
-     - samples (generated samples generated from the data preparation phase)
-     - stats (statistics files generated in the data preparation and used in the EDA Markdown)
-     the files (en_US.blogs, en_US.news,en_US.twitter) 
+     - en_US
+         - dictionaries (contains the generated vocabularies)
+         - resources (additional resources e.g profanity file )
+         - samples (generated samples generated from the data preparation phase)
+         - stats (statistics files generated in the data preparation and used in the EDA Markdown)
+         - en_US.blogs, en_US.news,en_US.twitter (the corpus text files)  
      
      
          
