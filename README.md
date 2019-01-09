@@ -2,8 +2,9 @@
 
 This Repository contains all the resources related to the data science specialization capstone project 
 
-To access the exploratory data analysis R MarkDown source please click [here](https://github.com/moufkir/datasciencejhu_capstone/blob/master/capstone_v1.5.RMD)
-To access the source code for the data preparation please click [here](https://github.com/moufkir/datasciencejhu_capstone/blob/master/data_preparation.R)
+- To access the exploratory data analysis R MarkDown source please click [here](https://github.com/moufkir/datasciencejhu_capstone/blob/master/capstone_v1.5.RMD)
+
+- To access the source code for the data preparation please click [here](https://github.com/moufkir/datasciencejhu_capstone/blob/master/data_preparation.R)
 
 The folder structur adopted for the data preparation and Analysis document generation is as follows :
 
