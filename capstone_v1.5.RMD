@@ -1,0 +1,460 @@
+---
+title: "JH Data Science Capstone : Language Modeling"
+author: "Mohammed Ait-Oufkir"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+header-includes:
+- \usepackage{tikz}
+- \usetikzlibrary{shapes.geometric,arrows}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Executive Summary
+
+The Goal of this NLP project is to  predict which is the most likely word that comes next in a given context (history of preceeding words), based on a text corpus.
+This report describes the methodolgy and steps performed in order to acheive this task.
+A thorough exploratory analysis of the data helps understanding the distribution of the words and their relationships  within the Corpora. 
+
+<br> As expected from the text content, a cleaning step should be performed. The perfomance issue is adressed and sampling strategy is discussed.
+An exploration of the n-gram model is provided at the end of the analysis. 
+
+For the sake of clarity the source code producing this report Analysis is hidden. The complete source code and the sample data file can be found in the link here.
+
+## Data Analysis
+
+### The Corpus
+The corpus is composed of the 3 categories of text :
+
+* Tweets 
+
+* Blogs 
+
+* News 
+
+The data is provided in different languages (English, German, Finish and Russian). Only English Corpora is analyzed in this project, the same logic will be implemented (considering language specifities) for the other languages.
+The data set used in this project is SwiftKey data set and can be downloaded [here](https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip)  
+
+
+### Visual inspection 
+
+A look into the data files shows us that :
+
+**The text contains some words/abreviations specific to tweets (specific dialect)**
+
+<center>
+ <span style="color:gray"> 
+  *I'm coo... Jus at work hella tired r u ever in cali*<br>
+  *Dammnnnnn what a catch*
+  </span>
+</center>
+
+
+**it contains also some special characters :**
+
+<span style="color:gray"> 
+ <center>
+  *I'm doing it!ðŸ‘¦* <br>
+   *â€œ: "The tragedy of life ...*
+ </center>
+</span>
+---
+
+**Usage of acronyms :**
+
+<span style="color:gray"> 
+ <center>
+ *I have a 3.0 GPA, and for the NCAA (Clearing House)...*<br>
+ *The agencies assigned AAA ratings to securities ...*<br>
+ *a spokesman for AAA Mid-Atlantic...*<br>
+ </center>
+</span>
+---
+
+**usage of casual language, numbers and upper-case :**
+
+<span style="color:gray"> 
+ <center>
+ *i'm not gonna be here much longer... :(*<br>
+ *Watcha know about half off 97*<br>
+ *4337 Koeln Av, $97,500*<br>
+ *gyeaaaaa. I know you gon do it.*<br>
+ *FRIENDLY SENIORS OF NORTH BERGEN*<br>
+ </center>
+</span>
+---
+
+**Some errors fonud in files :** <span style="color:orange">  *readLines(conn) : line 167155 appears to contain an embedded nul*</span>
+
+No assumptions are given on the category of the text corpus which means that the text that comes out of  (twitter, news and blogs) is a  common language and belongs to no specific field such as Scientific corpus.
+The analysis of the words/ngrams and their frequencies will somehow give us an indication of the dominate words/ngrams that represent the language and thus how much it covers the language.
+
+
+```{r echo=FALSE, message=F, warning=FALSE}
+#General loading and variables declaration
+
+if (require(knitr)==FALSE) (install.packages('knitr'));library(knitr)
+if (require(readtext)==FALSE) (install.packages('readtext'));library(readtext)
+if (require(kableExtra)==FALSE) (install.packages('kableExtra'));library(kableExtra)
+if (require(ngram)==FALSE) (install.packages('ngram'));library(ngram)
+if (require(wordcloud)==FALSE) (install.packages('wordcloud'));library(wordcloud)
+# Try to see if the lemmatization could bring some help
+if (require(textstem)==FALSE) (install.packages('textstem'));library(textstem)
+if (require(data.table)==FALSE) (install.packages('data.table'));library(data.table)
+if (require(ggplot2)==FALSE) (install.packages('ggplot2'));library(ggplot2)
+if (require(reshape2)==FALSE) (install.packages('reshape2'));library(reshape2)
+if (require(tm)==FALSE) (install.packages('tm'));library(tm)
+if (require(stringr)==FALSE) (install.packages('stringr'));library(stringr)
+if (require(gridExtra)==FALSE) (install.packages('gridExtra'));library(gridExtra)
+
+
+locale <- "en_US"
+data_path <- "./data"
+folder <-paste(data_path, locale, sep = "/")
+file_profane <-paste0(data_path,"/profanity_list.txt")
+stats_folder <- paste0(folder, "/stats")
+dict_path <- paste0(folder, "/dictionaries")
+```
+
+### Statistics on the corpus
+The following figures show how big is the corpus and gives a broad idea about the the amount of memory and the processing power needed to handle the data.
+we can clearly see that tweets has the most number of lines but the lines are shorter (no surprise knowing that tweets are restricted by number of characters), blogs contain longest line this is could be an indication about patterns in writing news and blogs.
+Considering the words we can see that Blogs then tweets have the most number of words (Total and Unique) but the lexical density of news $\frac{\sum W_{unique}}{ \sum W_{All}}$ is higher. this may be explained by the richness of the news writing over repition in the case of blogs and tweets. 
+
+```{r  echo=FALSE, message=F, warning=FALSE}
+corpus_stats <- read.csv(file=paste0(stats_folder, "/file_stats.csv"), header=TRUE, sep=",")
+kable(corpus_stats) %>%  kable_styling("striped", full_width = F) 
+
+``` 
+
+
+
+
+## Data Processing
+
+After loading the corpus and as in any standrad text mining task we need to pass through a cleaning process which will ease  relevant information extraction, even though cleaning  may cause information loss (the information loss measurment is out of the scope of this capstone).
+
+
+
+### Cleaning the corpus and handling Profanity
+
+```{r  echo=FALSE, message=F, warning=FALSE}
+############### Download Profanity words ############### 
+
+profaneWords <- function(file){
+  profane_dict <- fread(file, header = F, fill=T)
+  profane_words <- as.vector(profane_dict[['V1']])
+  return(profane_words)
+}
+
+profane_words= profaneWords(file = paste0(folder,"/resources/profanity_list.txt"))
+profane_list <- paste('\\b',profane_words, '\\b', sep='',collapse = "|")
+corpus_stats <- read.csv(file=paste0(dict_path,"/en_US_clean_dict.csv"), header=TRUE, sep=",")
+
+total_profane <- sum(str_count(corpus_stats$word ,profane_list))
+total_words <- sum(corpus_stats$tot_occur)
+
+#ratio_profane<-paste0(round(total_profane/total_words *100 ), "%")
+
+```
+
+
+After cleaning the document (removing stop words, Numbers , non alpha characters and unecessary spaces) we can see that the  profane words (relative to the profane list used for this analysis) are <span style="color:cornflowerblue"> **```r total_profane ```** </span> out of <span style="color:cornflowerblue"> **```r total_words ```** </span>  the total text so we can proceed to their removal. one question reamins do we need to remove the whole sentence that contain these words or only this words.
+
+
+### Analyzing word frequencies
+
+We can see that the stop words are the most frequent but after removing stop words some single character words such as **s** and **t** emerges and so potentially  the t after apostrophe did not get cleand out and need to be considered in the analysis.
+
+
+```{r echo=FALSE, message=F, warning=FALSE}
+dict_clean_df <- read.csv(file = paste0(dict_path,"/en_US_clean_dict.csv"), header =TRUE, sep = ",")
+dict_raw_df   <- read.csv(file = paste0(dict_path,"/en_US_raw_dict.csv"), header =TRUE, sep = ",")
+
+dict_clean_df<- dict_clean_df[order(dict_clean_df$tot_occur,decreasing = TRUE ),]
+dict_raw_df<- dict_raw_df[order(dict_raw_df$tot_occur,decreasing = TRUE ),]
+
+par(mfrow=c(1, 2))
+kable(head(dict_clean_df[, c('word','tot_occur')],10)) %>%  kable_styling("striped", full_width = F) 
+kable(head(dict_raw_df[,c('word','tot_occur')],10)) %>%  kable_styling("striped", full_width = F) 
+
+```
+A bar plot shows visually the frequencies of these words.
+
+```{r fig.width = 10, fig.align='center', echo=FALSE, message=F, warning=FALSE}
+### Plot word Frequencies
+library(ggplot2)
+#Word Frequency including Stop words
+st_plot<- ggplot(head(dict_raw_df,30), aes(x=reorder(word,-tot_occur), y=tot_occur )) +
+  geom_bar(stat="identity", fill = "#ee9656")+
+  ggtitle("Distribution of word frequencies (Stop Words Included)")+
+  labs(y="Frequencies", x = "Terms")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+
+#Word Frequency without Stopwords Stop words
+ug_plot<- ggplot(head(dict_clean_df,30), aes(x=reorder(word,-tot_occur), y=tot_occur )) +
+  geom_bar(stat="identity", fill = "#4286f4")+
+  ggtitle("Distribution of word frequencies")+
+  labs(y="Frequencies", x = "Terms")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+grid.arrange(st_plot, ug_plot, nrow = 1)
+
+```
+
+**Wordclouds**
+
+To highlight Visually the importance of words Wordcloud is a good choice.
+
+```{r fig.width = 10,  fig.align='center', echo=FALSE, message=F, warning=FALSE}
+library(wordcloud)
+par(mfrow=c(1, 2))
+wordcloud(head(dict_raw_df,30)$word, head(dict_raw_df,30)$tot_occur, min.freq=900,random.color=TRUE,colors=brewer.pal(n = 8, name = "Greys"))
+wordcloud(head(dict_clean_df,30)$word, head(dict_clean_df,30)$tot_occur, min.freq=900,random.color=TRUE,colors=brewer.pal(n = 12, name ="BrBG" ))
+
+
+```
+
+## Sampling and representativeness of the samples
+
+```{r echo=FALSE, message=F, warning=FALSE}
+stats_df<-read.csv( file = paste0(stats_folder,"/wordstat_all.csv"),header = TRUE, sep = ",")
+
+#kable(stats_df) %>%  kable_styling("striped", full_width = F) 
+```
+
+After creating a series of sample size from 1% to 90% we can observe that the number of unique words grow with the sample size, but this growth rate become smaller after a certain sample size.This confirms the observation from word frequencies that some words are predominant in the corpus. 
+
+The second graph shows that the processing time increase almost linearly as the sample size increases and this for the following 
+configuration:
+
+* Library used : TM
+* Text cleaning and word frequency (unigram only)
+* Machine configuration (CPU Intel Core i7 7th Gen 4 Cores, Memory : 16 GB)
+
+this gives us an indication about the time needed/complexity when we will generate bigrams and  upper n-grams. 
+
+The conclusion is that sampling is a reasonable option. now we should investigate further wich sampling size and strategy to adopt in order to obtain a relevent result when runing word prediction.
+
+
+```{r echo=FALSE, message=F, warning=FALSE}
+p_clean <- ggplot(stats_df[stats_df$category=='Clean',], aes(x=ratio)) + 
+  geom_line(aes(y= Blogs_uwc, colour="Blogs")) + 
+  geom_line(aes(y= News_uwc, colour="News"))+
+  geom_line(aes(y= Tweets_uwc, colour="Tweets"))+
+  geom_line(aes(y= Total_uwc, colour="Total"))+
+  labs(title="Unique Word Counts by text category (Cleaned Text)",x ="Sampling %", y = "Unique Word Counts")+
+  guides(colour=guide_legend(title="Text Category"))
+
+p_time <- ggplot(stats_df[stats_df$category=='Clean',], aes(x=ratio)) + 
+  geom_line(aes(y= Blogs_ts, colour="Blogs")) + 
+  geom_line(aes(y= News_ts, colour="News"))+
+  geom_line(aes(y= Tweets_ts, colour="Tweets"))+
+  labs(title="Processing Time by text category (Cleaned Text)",x ="Sampling %", y = "Processing Time (ms)")+
+  guides(colour=guide_legend(title="Text Category"))
+
+grid.arrange(p_clean, p_time)
+```
+
+
+### Text coverage 
+
+Let see how many words are covering  50% and 90% of the corpus.
+For this we need to run a cumulative sum of the word frequencies and check at which number of words we hit a 50% of the corpus coverage and at which number we hit the 90% coverage.
+
+
+
+```{r echo=FALSE, message=F, warning=FALSE}
+
+dict_clean_df$freq_all <- dict_clean_df$tot_occur /sum(dict_clean_df$tot_occur)
+dict_clean_df$word_order<- seq(1:dim(dict_clean_df)[1])
+dict_clean_df$cum_sum <- cumsum(dict_clean_df$freq_all)
+
+dict_raw_df$freq_all <- dict_raw_df$tot_occur /sum(dict_raw_df$tot_occur)
+dict_raw_df$word_order<- seq(1:dim(dict_raw_df)[1])
+dict_raw_df$cum_sum <- cumsum(dict_raw_df$freq_all)
+
+
+```
+
+```{r fig.align='center', fig.width=12,  echo=FALSE, message=F, warning=FALSE}
+library(grid)
+r_tsh_50 <- head(dict_raw_df[dict_raw_df$cum_sum >=0.5 ,],1)$word_order
+r_tsh_90 <- head(dict_raw_df[dict_raw_df$cum_sum >=0.9 ,],1)$word_order
+
+c_tsh_50 <- head(dict_clean_df[dict_clean_df$cum_sum >=0.5 ,],1)$word_order
+c_tsh_90 <- head(dict_clean_df[dict_clean_df$cum_sum >=0.9 ,],1)$word_order
+
+
+p_raw_cov <- ggplot(data= dict_raw_df[dict_raw_df$word_order<=10000,]) + geom_line(aes(x=cum_sum , y= word_order))
+p_raw_cov<- p_raw_cov +  geom_vline(xintercept=.50, linetype="dashed",   color = "blue", size=0.5)
+p_raw_cov<- p_raw_cov +  geom_vline(xintercept=.90, linetype="dashed",   color = "blue", size=0.5)
+p_raw_cov<- p_raw_cov +  geom_hline(yintercept=r_tsh_50, linetype="dashed",   color = "red", size=0.5)
+p_raw_cov<- p_raw_cov +  geom_hline(yintercept=r_tsh_90, linetype="dashed",   color = "red", size=0.5)
+p_raw_cov<- p_raw_cov +annotation_custom(grid.text(  paste(r_tsh_50,"words"), x=0.5,  y=0.09, gp=gpar(col="blue", fontsize=8) , draw = F))
+p_raw_cov<- p_raw_cov + annotation_custom(grid.text(paste(r_tsh_90,"words"), x=0.9,  y=0.6, gp=gpar(col="blue", fontsize=8) , draw = F))
+
+p_clean_cov <- ggplot(data= dict_clean_df[dict_clean_df$word_order<=10000,]) + geom_line(aes(x=cum_sum , y= word_order))
+p_clean_cov<- p_clean_cov +  geom_vline(xintercept=.50, linetype="dashed",   color = "blue", size=0.5)
+p_clean_cov<- p_clean_cov +  geom_vline(xintercept=.90, linetype="dashed",   color = "blue", size=0.5)
+p_clean_cov<- p_clean_cov +  geom_hline(yintercept=c_tsh_50, linetype="dashed",   color = "red", size=0.5)
+p_clean_cov<- p_clean_cov +  geom_hline(yintercept=c_tsh_90, linetype="dashed",   color = "red", size=0.5)
+p_clean_cov<- p_clean_cov + annotation_custom(grid.text(  paste(c_tsh_50,"words"), x=0.5,  y=0.12, gp=gpar(col="blue", fontsize=8) , draw = F))
+p_clean_cov<- p_clean_cov + annotation_custom(grid.text(  paste(c_tsh_90,"words"), x=0.9,  y=0.98, gp=gpar(col="blue", fontsize=8) , draw = F))
+
+
+grid.arrange(p_raw_cov, p_clean_cov, nrow=1, newpage = T)
+
+
+
+```
+
+
+The number of words required for the text coverage can be summerized as follow
+
+* The raw text (including stop words ) 
+  - `r r_tsh_50`  words to cover 50% 
+  - `r r_tsh_90`  words to cover 90% 
+
+* The cleaned text (no stop words and other processing methods as indicated above) 
+  - `r c_tsh_50`  words to cover 50% 
+  - `r c_tsh_90`  words to cover 90% 
+
+
+to cover 50% we do not need a large dictionary in both cases but always less in the raw text that includes stop words (stop words will be used in the prediction model). on the other hand to raise the coverage till 75% we still do not need a large dictionary. combining the results from this graph and the previous graph (Unique word counts by text category) we can say that 10% sample size is a reasonable size for the project.
+
+Another interesting property that we can observe in the data is the quasi-linearity of the relationship between the log(word Rank) and log(word frequency), this property known as zipf's law say's that the word frequency is inversly proportional to its rank.
+
+```{r fig.align='center', fig.width=12,  echo=FALSE, message=F, warning=FALSE}
+
+sample_10_file <- paste0(folder,"/samples/sample_10/1_gram.csv")
+df_sample_10 <- read.csv(sample_10_file, header = TRUE, sep=',')
+df_sample_10$nr<- row(df_sample_10, as.factor = F )[,1]
+p<- ggplot(data = head(df_sample_10, 3000), aes(x = log(nr), y=log(freq)  ))  + geom_point() 
+p<- p + labs(title="Relationship between word Frequency and Word Rank",x ="Log10(Word Rank)", y = "Log10(Word Frequency)")
+plot(p)
+
+```
+
+
+Also in order to improve the quality of the sample  we can envisage the following techniques:
+
+* Stemming : will reduce the words to their stems and thus increase the frequency of the stem, the stem will count for any unseen word derived from the stem, but this will need a reconstruction of words from the stem if predicted (or propose all different words related to the stem in the solution).
+
+* Smoothing techniques
+
+* Transform the profanity into a normal language within the text (even if in the corpora there not a huge amount of profane words)
+
+
+### Foreign languages words evaluation
+
+To spot words from a foreing language we can use one of the following techniques :
+
+* The unicode could be a good option to spot  words that are outside the unicode set for the language of interest.
+* The usage of a fixed dictionary of the language of interest to spot words which did not belong to that dictionary.
+
+The analysis in this report consider only English corpora. but the same logic is valid for any language corpora.
+
+
+### Generating the N-grams
+
+The n-grams that are shown below are based on the 10% sample of the data. the ngram library is used for this step. further libraries will be explored from the performance stand point.
+
+```{r  echo=FALSE, message=F, warning=FALSE}
+ngrams_folder <- paste0(folder, "/samples/sample_10/")
+
+unigram_df<- read.csv(file = paste0(ngrams_folder,"1_gram.csv"),header = TRUE, sep = ",")
+
+unigram_df<- head(unigram_df, 30)
+bigram_df<- read.csv(file = paste0(ngrams_folder,"2_gram.csv"),header = TRUE, sep = ",")
+bigram_df<-  head(bigram_df, 30)
+trigram_df<- read.csv(file = paste0(ngrams_folder,"3_gram.csv"),header = TRUE, sep = ",")
+trigram_df<-  head(trigram_df, 30)
+fourgram_df<- read.csv(file = paste0(ngrams_folder,"4_gram.csv"),header = TRUE, sep = ",")
+fourgram_df<-  head(fourgram_df, 30)
+```
+
+```{r fig.align='center', fig.width=12,  echo=FALSE, message=F, warning=FALSE}
+unigram_plot<- ggplot(unigram_df, aes(x=reorder(ngrams,-freq), y=freq )) +
+  geom_bar(stat="identity", fill = "#4ecbc7")+
+  ggtitle("Distribution of Unigrams frequencies")+
+  labs(y="Frequencies", x = "Uni-Grams")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+bigram_plot<- ggplot(bigram_df, aes(x=reorder(ngrams,-freq), y=freq )) +
+  geom_bar(stat="identity", fill = "#4ecbc7")+
+  ggtitle("Distribution of Bigrams frequencies")+
+  labs(y="Frequencies", x = "Bi-Grams")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+trigram_plot<- ggplot(trigram_df, aes(x=reorder(ngrams,-freq), y=freq )) +
+  geom_bar(stat="identity", fill = "#4ea2cb")+
+  ggtitle("Distribution of Tri-Grams frequencies")+
+  labs(y="Frequencies", x = "Tri-Grams")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+fourgram_plot<- ggplot(fourgram_df, aes(x=reorder(ngrams,-freq), y=freq )) +
+  geom_bar(stat="identity", fill = "#41758f")+
+  ggtitle("Distribution of 4-Grams frequencies")+
+  labs(y="Frequencies", x = "4-Grams")+ theme(axis.text.x=element_text(angle=45, hjust=1))
+
+grid.arrange( unigram_plot, bigram_plot,trigram_plot,fourgram_plot, nrow = 2)
+
+```
+
+```{r fig.width = 12, fig.height = 10, fig.align='center', echo=FALSE, message=F, warning=FALSE}
+library(wordcloud)
+par(mfrow=c(2, 2))
+wordcloud(unigram_df$ngrams, unigram_df$freq, min.freq=800,random.color=TRUE,colors=brewer.pal(n = 8, name = "RdBu"))
+wordcloud(bigram_df$ngrams, bigram_df$freq, min.freq=800,random.color=TRUE,colors=brewer.pal(n = 8, name = "BrBG"))
+wordcloud(trigram_df$ngrams, trigram_df$freq, min.freq=200,random.color=TRUE,colors=brewer.pal(n = 8, name = "PRGn"))
+wordcloud(fourgram_df$ngrams, fourgram_df$freq, min.freq=900,random.color=TRUE,colors=brewer.pal(n = 8, name = "BuPu"))
+
+```
+
+
+## Conclusion & plan for the model implementation
+
+The model that will be used in this analysis is the n-gram model. For example the prediction of  the word <span style="color:blue"> **`now`**</span> given the word <span style="color:blue"> **`right`**</span> is calculated following the Maximum Likelihood Estimation (MLE) formula below:
+
+$$P(now\enspace|\enspace right) = \frac {P(right \enspace now)}{P(right)}$$
+* $P(now\enspace|\enspace right)$ : This is what we wanted to calculate.
+
+* $P(right \enspace now)$ The frequency of the bi-gram <span style="color:blue"> **`right now`**</span>  in the corpus.
+
+* $P(right)$ The frequency of the uni-gram <span style="color:blue"> **`right`**</span>  in the corpus.
+
+
+To avoid keeping track of all the possible ngrams in memory, we can rely only on a small set of ngrams e.g.  $N \in \{2,3,4\}$ and use the  [Markov Property](https://en.wikipedia.org/wiki/Markov_property). in short the markov property tells that the probability of a new word depends only on the last word in the sentence and not the whole sentence.
+
+So the idea is to approximate the next word from a set of N-grams ($N \in \{2,3,4\}$) 
+$$P(w_{n} | w_{1}^{n-1}) \approx P(w_{n} | w_{n+N-1})$$
+instead of calculating the complete history of previous words
+$$\prod_{i=1}^{n}P(w_{i} | w_{1}^{i-1})$$
+
+For the unseen words the [Katz backoff smoothing](https://en.wikipedia.org/wiki/Katz%27s_back-off_model) is chosen.
+
+The data is split into 2 parts a training and validation sets and the perplexity metric for the different ngrams will be adopted.
+
+A shiny application will be developed to allow end user test the predictions.
+  
+## Reference:
+
+[Profanity List](https://en.wiktionary.org/wiki/Category:English_swear_words)
+
+[Number Of words in English Merriam-Webster](https://www.merriam-webster.com/help/faq-how-many-english-words)
+
+[Number Of words in English Oxford](https://en.oxforddictionaries.com/explore/how-many-words-are-there-in-the-english-language)
+
+[n-gram package](https://cran.r-project.org/web/packages/ngram/vignettes/ngram-guide.pdf)
+
+[n-gram Model](https://lagunita.stanford.edu/c4x/Engineering/CS-224N/asset/slp4.pdf)
+
+[Zipf's Law](https://en.wikipedia.org/wiki/Zipf%27s_law)
+
+[zipf's Law Stanford](https://nlp.stanford.edu/IR-book/html/htmledition/zipfs-law-modeling-the-distribution-of-terms-1.html)
+
+[Contractions Management](https://gist.github.com/nealrs/96342d8231b75cf4bb82)
+
+
